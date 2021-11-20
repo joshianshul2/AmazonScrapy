@@ -1,69 +1,99 @@
 import scrapy
 from ..items import AmazonscrapyItem
 import pandas as pd
+from csv import writer
+from pathlib import Path
+import numpy as np
+import pickle
 import os
-# n=1
+import time
+
+
+my_scrap_count_path = Path("scrap_count.pickle")
+my_scrap_count = 0
+
+if my_scrap_count_path.exists():
+    with open('scrap_count.pickle', 'rb') as handle:
+        my_scrap_count = pickle.load(handle)['count']
+else:
+    my_scrap_count=1
+    with open('scrap_count.pickle', 'wb') as handle:
+        pickle.dump({"count":2},handle)
+
+
+output_df_path = Path("example.csv")
+output_df = None
+
+if output_df_path.exists():
+    output_df = pd.read_csv("example.csv")
+
+
+timestamp = time.time()
+datetime = time.strftime('%A, %Y-%m-%d %H:%M:%S', time.localtime(timestamp))
+
 
 class AmazonScrap(scrapy.Spider):
     name = 'amazon'
-    n = 1
-    # start_urls =[
-    #     # 'https://quotes.toscrape.com'
-    #     # 'https: // www.amazon. in / Apple - iPhone - 13 - 256GB - Starlight / dp / B09G9BFKZN / ref = sr_1_4?keywords = iphone + 13 & qid = 1636577482 & sr = 8 - 4'
-    #     # 'https://www.amazon.in/dp/B089MS7D8F/ref=s9_acsd_al_bw_c2_x_0_i?pf_rd_m=A1K21FY43GMZF8&pf_rd_s=merchandised-search-9&pf_rd_r=VY17PK5WN2TKMK73SSPF&pf_rd_t=101&pf_rd_p=c72a5fc5-b047-4381-a508-8e89492aff17&pf_rd_i=20303904031&th=1'
-    #     # 'https://www.amazon.in/Bigmuscles-Nutrition-Chocolate-Concentrate-Glutamic/dp/B084H8LWC3?ref_=Oct_DLandingS_D_c1701101_60&smid=AT95IG9ONZD7S',
-    #     'https://www.amazon.in/TCL-inches-Certified-Android-55P615/dp/B08FD3269H?th=1',
-    #     'https://www.amazon.in/Sony-Bravia-inches-KD-65X80J-Compatibility/dp/B091N3MQ92?th=1'
-    #
-    #     # 'http://' + 'www.amazon. in / Apple - iPhone - 13 - 256GB - Starlight / dp / B09G9BFKZN / ref = sr_1_4?keywords = iphone + 13 & qid = 1636577482 & sr = 8 - 4'.encode('idna').decode('utf-8')
-    # ]
 
+
+
+    def __init__(self):
+        self.priceList=[]
+        self.urlList=[]
+
+        if(output_df_path.exists()):
+            self.priceList = [0]*len(output_df)
 
     def start_requests(self):
-        df = pd.read_csv('aj.csv')
-        #Here fileContainingUrls.csv is a csv file which has a column named as 'URLS'
-        # contains all the urls which you want to loop over.
-        urlList = df['URLS'].to_list()
+        url_df = pd.read_csv('aj.csv')
+        self.urlList = url_df['URLS'].values
+        for URL in self.urlList:
+            yield scrapy.Request(url=URL, callback=self.parse)
 
-        for i in urlList:
-             yield scrapy.Request(url = i, callback=self.parse)
+    def parse(self, response):
+        global output_df
+        global my_scrap_count
+        items = RishuItem()
 
-    def parse(self,response):
-        # title = response.css('title').extract()
-        items = AmazonscrapyItem()
-        # header = ["Product Name", "Price"]
-        # df1 = pd.DataFrame()
+
 
         product_name = response.css('#productTitle::text').extract()
         product_price = response.css('#priceblock_ourprice').css('::text').getall()
-        # product_details = response.css('.a-size-base').css('::text').getall()
-        # yield {'titletext': title}
+        product_details = response.css('#productDetails_detailBullets_sections1 tr:nth-child(1) .prodDetAttrValue').css('::text').getall()
+
 
         items['product_name'] = product_name
-        items['product_price'] = product_price
-        # items['product_details'] = product_details
+        items['product_price'] = product_price if product_price else ["Not Available"]
+        items['product_details'] = product_details
+        item_url = str(response).split()[1][:-1]
 
 
         yield items
-        print("Anshul joshi")
-
-        print("Rishiii", items['product_name'], items['product_price'])
-        dict = {'product_name':items['product_name'], 'product_price':items['product_price']}
-        # lst=[ items['product_name'] , items['product_price'] ]
-
-        # dict["Age"].append(30)
-        # print(lst)
-
-        df = pd.DataFrame(dict)
-        print("hi from csv")
-        # result = df.loc[:, ['items['product_name']', 'items['product_price']']]
-        # os.remove('example.csv')
 
 
-        # saving the dataframe
-        # df.to_csv('rishu.csv')
-        # header = ["product_name","product_price"]
-        # df.to_csv('my_csv.csv', mode='a')
-        df.to_csv("test1.csv",mode='a',index=False)
+        if my_scrap_count > 1:
+
+            self.priceList[np.where(output_df.URLS == item_url)[0][0]] = items['product_price'][0]
+            
+            if len(self.priceList) == len(output_df):
+                output_df['product_price ' + str(datetime)] = self.priceList
+                output_df.to_csv("example.csv", index=False)
+
+        else:
+
+            if output_df_path.exists():
+                dict = {'URLS': item_url, 'product_price ' + str(datetime): items['product_price'][0]}
+                output_df = output_df.append(dict,ignore_index=True)
+
+            else:
+                dict = {'URLS': item_url, 'product_price ' + str(datetime): items['product_price']  }
+                output_df = pd.DataFrame(dict)
+
+            output_df.to_csv("example.csv", index=False)
+
+
+
+
+
 
 
